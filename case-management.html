@@ -9,8 +9,10 @@
   - ISP 단계(위기/집중/유지)에 따라 다음 개입 예정일을 자동 계산합니다.
     위기: 7일마다 · 집중: 30일마다 · 유지: 90일마다
   - 다음 개입일까지 남은 기간을 색으로 표시합니다. (기한초과=빨강, 임박=노랑, 여유=초록)
-  - 파일 하나로 동작합니다. 서버·AI·로그인 없음. 입력은 이 브라우저에만 저장됩니다.
+  - 엑셀(이름/성별/나이/생년월일/주소/전화번호/ISP단계/최근 개입일)을 업로드해 현황을 한 번에 불러올 수 있습니다.
+  - 파일 하나로 동작합니다. 서버·AI·로그인 없음. 입력은 이 브라우저에만 저장됩니다. (엑셀 업로드 기능만 최초 로딩 시 인터넷 연결이 필요합니다)
 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --navy:#1F3A5F; --accent:#2B6CB0;
@@ -61,6 +63,7 @@
   .due .badge.ok{background:var(--ok-bg);color:var(--ok-fg)}
   .due .date{font-size:11.5px;color:var(--mute)}
   .empty{padding:30px;text-align:center;color:var(--mute)}
+  .tip{font-size:12.5px;color:var(--mute);margin:0 0 12px}
   .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mute);margin-top:10px}
   .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;opacity:0;transition:.3s;z-index:10}
@@ -101,8 +104,11 @@
       <input type="text" id="search" placeholder="이름 검색">
       <div class="spacer"></div>
       <button class="primary" id="add">+ 대상자 추가</button>
+      <button id="importBtn">엑셀 업로드</button>
+      <input type="file" id="importFile" accept=".xlsx,.xls,.csv" hidden>
       <button id="copyTable">표로 복사</button>
     </div>
+    <p class="tip">엑셀 첫 행에 <b>이름·성별·나이·생년월일·주소·전화번호·ISP단계·최근 개입일</b> 열 제목이 있으면 자동으로 인식합니다. (나이는 생년월일로 다시 계산되어 표시됩니다)</p>
 
     <table>
       <thead>
@@ -276,6 +282,86 @@ function buildRow(c, due){
 }
 
 function esc(s){ return (s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+// ── 엑셀 업로드 ──────────────────────────────────────────
+const HEADER_ALIASES = {
+  name: ['이름','성명','name'],
+  gender: ['성별','gender','성'],
+  birth: ['생년월일','생일','birth','birthdate'],
+  address: ['주소','address'],
+  phone: ['전화번호','연락처','전화','phone'],
+  stage: ['isp단계','isp단계(위기/집중/유지)','isp','단계','stage'],
+  lastDate: ['최근개입일','최근개입일자','개입일','최근개입','lastdate'],
+};
+function normKey(k){ return String(k).trim().replace(/\s+/g,'').toLowerCase(); }
+function pickCell(row, field){
+  const aliases = HEADER_ALIASES[field];
+  const key = Object.keys(row).find(k => aliases.includes(normKey(k)));
+  return key ? row[key] : '';
+}
+function parseGenderCell(v){
+  const s = String(v||'').trim();
+  if(/^(m|남|male)/i.test(s)) return 'M';
+  if(/^(f|여|female)/i.test(s)) return 'F';
+  return '';
+}
+function parseStageCell(v){
+  const s = String(v||'').trim();
+  if(s.includes('위기')) return 'crisis';
+  if(s.includes('집중')) return 'active';
+  if(s.includes('유지')) return 'maint';
+  return 'crisis'; // 단계가 비어 있거나 알 수 없으면 안전하게 위기(가장 잦은 점검)로 설정
+}
+function parseDateCell(v){
+  if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  if(typeof v === 'number' && window.XLSX && XLSX.SSF){
+    const d = XLSX.SSF.parse_date_code(v);
+    if(d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+  }
+  const s = String(v||'').trim();
+  const m = s.match(/^(\d{4})[.\-\/]\s*(\d{1,2})[.\-\/]\s*(\d{1,2})/) || s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m) return `${m[1]}-${String(+m[2]).padStart(2,'0')}-${String(+m[3]).padStart(2,'0')}`;
+  return '';
+}
+function rowToClient(row){
+  const name = String(pickCell(row,'name')||'').trim();
+  if(!name) return null;
+  return {
+    id: uid(),
+    name,
+    gender: parseGenderCell(pickCell(row,'gender')),
+    birth: parseDateCell(pickCell(row,'birth')),
+    address: String(pickCell(row,'address')||'').trim(),
+    phone: String(pickCell(row,'phone')||'').trim(),
+    stage: parseStageCell(pickCell(row,'stage')),
+    lastDate: parseDateCell(pickCell(row,'lastDate')) || todayStr(),
+    registeredAt: todayStr(),
+  };
+}
+document.getElementById('importBtn').onclick = () => {
+  if(typeof XLSX === 'undefined'){ toast('엑셀 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인해주세요'); return; }
+  document.getElementById('importFile').click();
+};
+document.getElementById('importFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array', cellDates:true });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
+    const imported = rows.map(rowToClient).filter(Boolean);
+    if(!imported.length){ toast('가져올 데이터가 없습니다 (이름 열을 확인해주세요)'); return; }
+    const replace = confirm(`${imported.length}건을 읽었습니다.\n\n[확인] 기존 목록을 지우고 이 데이터로 교체\n[취소] 기존 목록 뒤에 추가`);
+    setAll(replace ? imported : [...getAll(), ...imported]);
+    render();
+    toast(`${imported.length}건 ${replace ? '교체' : '추가'} 완료`);
+  }catch(err){
+    toast('엑셀 파일을 읽는 중 문제가 발생했습니다');
+  }finally{
+    e.target.value = '';
+  }
+});
 
 function toast(m){ const t = document.getElementById('toast'); t.textContent = m; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 1600); }
 function copy(text, m){ navigator.clipboard.writeText(text).then(() => toast(m)); }
