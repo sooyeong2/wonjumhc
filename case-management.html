@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>대상자 사례관리 (ISP 개입 일정)</title>
+<!--
+  ▶ 대상자 사례관리 도구
+  - ISP 단계(위기/집중/유지)에 따라 다음 개입 예정일을 자동 계산합니다.
+    위기: 7일마다 · 집중: 30일마다 · 유지: 90일마다
+  - 다음 개입일까지 남은 기간을 색으로 표시합니다. (기한초과=빨강, 임박=노랑, 여유=초록)
+  - 엑셀(이름/성별/나이/생년월일/주소/전화번호/ISP단계/최근 개입일)을 업로드해 현황을 한 번에 불러올 수 있습니다.
+  - 파일 하나로 동작합니다. 서버·AI·로그인 없음. 입력은 이 브라우저에만 저장됩니다. (엑셀 업로드 기능만 최초 로딩 시 인터넷 연결이 필요합니다)
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --navy:#1F3A5F; --accent:#2B6CB0;
+    --bg:#F6F8FB; --line:#D9E0E8; --soft:#EEF2F7; --ink:#1D2430; --mute:#5F6B7A;
+    --crisis:#C0392B; --active:#B7791F; --maint:#2F8F4E;
+    --danger-bg:#FBE1DE; --danger-fg:#9A2A1F;
+    --warn-bg:#FCEFCB; --warn-fg:#8A6116;
+    --ok-bg:#E1F3E6; --ok-fg:#1F6B3A;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+  header{background:var(--navy);color:#fff;padding:16px 20px}
+  header h1{margin:0;font-size:20px}header p{margin:4px 0 0;font-size:13px;opacity:.85}
+  main{max-width:1300px;margin:0 auto;padding:16px 20px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .summary{display:flex;gap:10px;flex-wrap:wrap}
+  .stat{flex:1;min-width:120px;border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--soft)}
+  .stat b{display:block;font-size:22px;color:var(--navy)}
+  .stat span{font-size:12px;color:var(--mute)}
+  .stat.crisis{border-left:5px solid var(--crisis)}
+  .stat.active{border-left:5px solid var(--active)}
+  .stat.maint{border-left:5px solid var(--maint)}
+  .stat.overdue{border-left:5px solid var(--danger-fg)}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .toolbar input[type=text]{padding:8px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;min-width:160px}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap}
+  .tab{padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;cursor:pointer;font-size:13px}
+  .tab.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  .spacer{flex:1}
+  button{padding:9px 14px;border:1px solid var(--line);background:#fff;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  button.done{background:var(--ok-fg);color:#fff;border-color:var(--ok-fg);padding:6px 10px;font-size:12px;white-space:nowrap}
+  button.del{padding:6px;color:#b00;border:none;background:none;font-size:16px}
+  .table-wrap{overflow-x:auto}
+  table{width:100%;min-width:1560px;border-collapse:collapse;font-size:13.5px}
+  thead th{text-align:left;font-size:12px;color:var(--mute);font-weight:bold;padding:6px 8px;border-bottom:2px solid var(--line);white-space:nowrap}
+  tbody td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+  tbody tr:hover{background:var(--soft)}
+  input,select{width:100%;padding:7px;border:1px solid var(--line);border-radius:8px;font-size:13.5px;font-family:inherit}
+  input.age{background:var(--soft);color:var(--mute);text-align:center}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:bold;color:#fff;white-space:nowrap}
+  .pill.crisis{background:var(--crisis)}
+  .pill.active{background:var(--active)}
+  .pill.maint{background:var(--maint)}
+  .due{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
+  .due .badge{padding:4px 10px;border-radius:8px;font-size:12px;font-weight:bold;white-space:nowrap}
+  .due .badge.overdue{background:var(--danger-bg);color:var(--danger-fg)}
+  .due .badge.soon{background:var(--warn-bg);color:var(--warn-fg)}
+  .due .badge.ok{background:var(--ok-bg);color:var(--ok-fg)}
+  .due .date{font-size:11.5px;color:var(--mute)}
+  .empty{padding:30px;text-align:center;color:var(--mute)}
+  .tip{font-size:12.5px;color:var(--mute);margin:0 0 12px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mute);margin-top:10px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:999px;font-size:13px;opacity:0;transition:.3s;z-index:10}
+  .toast.on{opacity:1}
+  @media(max-width:900px){
+    table,thead,tbody,tr,td{display:block}
+    table{min-width:0}
+    thead{display:none}
+    tbody tr{border:1px solid var(--line);border-radius:10px;margin-bottom:10px;padding:8px}
+    tbody td{border:none;display:flex;justify-content:space-between;gap:8px;align-items:center;padding:4px 2px}
+    tbody td::before{content:attr(data-label);font-size:11px;color:var(--mute);flex:0 0 78px}
+    tbody td>*{flex:1}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>대상자 사례관리 (ISP 개입 일정)</h1>
+  <p>ISP 단계(위기·집중·유지)에 맞춰 다음 개입 예정일을 자동 계산하고, 임박·초과 여부를 색으로 안내합니다.</p>
+</header>
+<main>
+  <div class="card">
+    <div class="summary">
+      <div class="stat crisis"><b id="cntCrisis">0</b><span>위기 단계 (주 1회)</span></div>
+      <div class="stat active"><b id="cntActive">0</b><span>집중 단계 (월 1회)</span></div>
+      <div class="stat maint"><b id="cntMaint">0</b><span>유지 단계 (3개월 1회)</span></div>
+      <div class="stat overdue"><b id="cntOverdue">0</b><span>개입 기한 초과</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="toolbar">
+      <div class="tabs" id="stageTabs">
+        <div class="tab on" data-stage="all">전체</div>
+        <div class="tab" data-stage="crisis">위기</div>
+        <div class="tab" data-stage="active">집중</div>
+        <div class="tab" data-stage="maint">유지</div>
+      </div>
+      <input type="text" id="search" placeholder="이름 검색">
+      <div class="spacer"></div>
+      <button class="primary" id="add">+ 대상자 추가</button>
+      <button id="importBtn">엑셀 업로드</button>
+      <input type="file" id="importFile" accept=".xlsx,.xls,.csv" hidden>
+      <button id="copyTable">표로 복사</button>
+      <button id="exportExcel">엑셀로 다운로드</button>
+    </div>
+    <p class="tip">엑셀 첫 행에 <b>이름·성별·나이·생년월일·주소·전화번호·진단명·이용병원·최근 자살시도·ISP단계·최근 개입일</b> 열 제목이 있으면 자동으로 인식합니다. (나이는 생년월일로 다시 계산되어 표시됩니다)</p>
+
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:8%">이름</th>
+          <th style="width:5%">성별</th>
+          <th style="width:4%">나이</th>
+          <th style="width:8%">생년월일</th>
+          <th style="width:12%">주소</th>
+          <th style="width:9%">전화번호</th>
+          <th style="width:7%">진단명</th>
+          <th style="width:7%">이용병원</th>
+          <th style="width:8%">최근 자살시도</th>
+          <th style="width:7%">ISP 단계</th>
+          <th style="width:8%">최근 개입일</th>
+          <th style="width:10%">다음 개입 예정일</th>
+          <th style="width:10%"></th>
+          <th style="width:3%"></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    </div>
+    <div class="empty" id="emptyMsg" style="display:none">등록된 대상자가 없습니다. "+ 대상자 추가"로 시작하세요.</div>
+
+    <div class="legend">
+      <span><i style="background:var(--crisis)"></i>위기 단계</span>
+      <span><i style="background:var(--active)"></i>집중 단계</span>
+      <span><i style="background:var(--maint)"></i>유지 단계</span>
+      <span style="margin-left:10px"><i style="background:var(--danger-fg)"></i>기한초과</span>
+      <span><i style="background:var(--warn-fg)"></i>3일 이내 임박</span>
+      <span><i style="background:var(--ok-fg)"></i>여유</span>
+    </div>
+  </div>
+</main>
+<div class="toast" id="toast">저장되었습니다</div>
+<script>
+const KEY = 'caseManagement.clients.v1';
+const STAGES = {
+  crisis: { label: '위기', days: 7,  cls: 'crisis' },
+  active: { label: '집중', days: 30, cls: 'active' },
+  maint:  { label: '유지', days: 90, cls: 'maint'  },
+};
+const SOON_DAYS = 3; // 다음 개입일까지 이 일수 이내면 "임박"으로 표시
+
+const $rows = document.getElementById('rows');
+const $search = document.getElementById('search');
+let filterStage = 'all';
+
+function uid(){ return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function load(){ try{ return JSON.parse(localStorage.getItem(KEY)) || null }catch(e){ return null } }
+function save(list){ try{ localStorage.setItem(KEY, JSON.stringify(list)) }catch(e){} }
+
+function addDays(dateStr, days){
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0,10);
+}
+function dayDiff(dateStr){
+  const a = new Date(todayStr() + 'T00:00:00');
+  const b = new Date(dateStr + 'T00:00:00');
+  return Math.round((b - a) / 86400000);
+}
+function calcAge(birth){
+  if(!birth) return '';
+  const b = new Date(birth + 'T00:00:00');
+  const t = new Date();
+  let age = t.getFullYear() - b.getFullYear();
+  const beforeBirthday = (t.getMonth() < b.getMonth()) || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate());
+  if(beforeBirthday) age -= 1;
+  return age >= 0 ? age : '';
+}
+function fmtDate(d){
+  if(!d) return '';
+  const [y,m,day] = d.split('-');
+  return `${y}.${m}.${day}`;
+}
+
+function getAll(){
+  return (window.__clients || []);
+}
+function setAll(list){
+  window.__clients = list;
+  save(list);
+}
+
+function nextDueOf(c){
+  const stage = STAGES[c.stage] || STAGES.crisis;
+  const base = c.lastDate || c.registeredAt || todayStr();
+  return addDays(base, stage.days);
+}
+
+function render(){
+  const list = getAll();
+  const q = $search.value.trim();
+  const shown = list
+    .filter(c => filterStage === 'all' || c.stage === filterStage)
+    .filter(c => !q || (c.name || '').includes(q))
+    .map(c => ({ c, due: nextDueOf(c) }))
+    .sort((a,b) => a.due < b.due ? -1 : a.due > b.due ? 1 : 0);
+
+  $rows.innerHTML = '';
+  document.getElementById('emptyMsg').style.display = shown.length ? 'none' : 'block';
+
+  let cCrisis=0, cActive=0, cMaint=0, cOverdue=0;
+  list.forEach(c => {
+    if(c.stage === 'crisis') cCrisis++;
+    else if(c.stage === 'active') cActive++;
+    else if(c.stage === 'maint') cMaint++;
+    if(dayDiff(nextDueOf(c)) < 0) cOverdue++;
+  });
+  document.getElementById('cntCrisis').textContent = cCrisis;
+  document.getElementById('cntActive').textContent = cActive;
+  document.getElementById('cntMaint').textContent = cMaint;
+  document.getElementById('cntOverdue').textContent = cOverdue;
+
+  shown.forEach(({c, due}) => $rows.appendChild(buildRow(c, due)));
+}
+
+function buildRow(c, due){
+  const stage = STAGES[c.stage] || STAGES.crisis;
+  const diff = dayDiff(due);
+  let badgeCls = 'ok', badgeText = `D-${diff}`;
+  if(diff < 0){ badgeCls = 'overdue'; badgeText = `기한초과 ${Math.abs(diff)}일`; }
+  else if(diff === 0){ badgeCls = 'soon'; badgeText = '오늘 개입'; }
+  else if(diff <= SOON_DAYS){ badgeCls = 'soon'; badgeText = `D-${diff} 임박`; }
+
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td data-label="이름"><input class="f-name" value="${esc(c.name)}" placeholder="이름"></td>
+    <td data-label="성별">
+      <select class="f-gender">
+        <option value="" ${!c.gender?'selected':''}>-</option>
+        <option value="M" ${c.gender==='M'?'selected':''}>남</option>
+        <option value="F" ${c.gender==='F'?'selected':''}>여</option>
+      </select>
+    </td>
+    <td data-label="나이"><input class="age" value="${calcAge(c.birth)}" readonly></td>
+    <td data-label="생년월일"><input class="f-birth" type="date" value="${c.birth||''}"></td>
+    <td data-label="주소"><input class="f-addr" value="${esc(c.address)}" placeholder="주소"></td>
+    <td data-label="전화번호"><input class="f-phone" value="${esc(c.phone)}" placeholder="010-0000-0000"></td>
+    <td data-label="진단명"><input class="f-diagnosis" value="${esc(c.diagnosis)}" placeholder="진단명"></td>
+    <td data-label="이용병원"><input class="f-hospital" value="${esc(c.hospital)}" placeholder="이용병원"></td>
+    <td data-label="최근 자살시도"><input class="f-suicide" type="date" value="${c.suicideAttemptDate||''}"></td>
+    <td data-label="ISP 단계">
+      <select class="f-stage">
+        ${Object.entries(STAGES).map(([k,v]) => `<option value="${k}" ${c.stage===k?'selected':''}>${v.label} (${v.days === 7 ? '주1회' : v.days === 30 ? '월1회' : '3개월1회'})</option>`).join('')}
+      </select>
+    </td>
+    <td data-label="최근 개입일"><input class="f-last" type="date" value="${c.lastDate || c.registeredAt || todayStr()}"></td>
+    <td data-label="다음 개입 예정일">
+      <div class="due">
+        <span class="pill ${stage.cls}">${stage.label}</span>
+        <span class="badge ${badgeCls}">${badgeText}</span>
+        <span class="date">${fmtDate(due)}</span>
+      </div>
+    </td>
+    <td data-label=""><button class="done">오늘 개입 완료</button></td>
+    <td data-label=""><button class="del" title="삭제">✕</button></td>
+  `;
+
+  const upd = (field, val) => { c[field] = val; setAll(getAll()); render(); };
+  tr.querySelector('.f-name').addEventListener('change', e => upd('name', e.target.value));
+  tr.querySelector('.f-gender').addEventListener('change', e => upd('gender', e.target.value));
+  tr.querySelector('.f-birth').addEventListener('change', e => upd('birth', e.target.value));
+  tr.querySelector('.f-addr').addEventListener('change', e => upd('address', e.target.value));
+  tr.querySelector('.f-phone').addEventListener('change', e => upd('phone', e.target.value));
+  tr.querySelector('.f-diagnosis').addEventListener('change', e => upd('diagnosis', e.target.value));
+  tr.querySelector('.f-hospital').addEventListener('change', e => upd('hospital', e.target.value));
+  tr.querySelector('.f-suicide').addEventListener('change', e => upd('suicideAttemptDate', e.target.value));
+  tr.querySelector('.f-stage').addEventListener('change', e => upd('stage', e.target.value));
+  tr.querySelector('.f-last').addEventListener('change', e => upd('lastDate', e.target.value));
+  tr.querySelector('.done').addEventListener('click', () => { upd('lastDate', todayStr()); toast(`${c.name || '대상자'} 개입 기록 완료 · 다음 예정일 갱신`); });
+  tr.querySelector('.del').addEventListener('click', () => {
+    if(!confirm(`${c.name || '이 대상자'}를(을) 목록에서 삭제할까요?`)) return;
+    setAll(getAll().filter(x => x.id !== c.id));
+    render();
+  });
+  return tr;
+}
+
+function esc(s){ return (s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+// ── 엑셀 업로드 ──────────────────────────────────────────
+const HEADER_ALIASES = {
+  name: ['이름','성명','name'],
+  gender: ['성별','gender','성'],
+  birth: ['생년월일','생일','birth','birthdate'],
+  address: ['주소','address'],
+  phone: ['전화번호','연락처','전화','phone'],
+  diagnosis: ['진단명','진단','diagnosis'],
+  hospital: ['이용병원','병원','이용병원명','hospital'],
+  suicideAttemptDate: ['최근자살시도','자살시도','자살시도일','최근자살시도일','suicideattempt','suicideattemptdate'],
+  stage: ['isp단계','isp단계(위기/집중/유지)','isp','단계','stage'],
+  lastDate: ['최근개입일','최근개입일자','개입일','최근개입','lastdate'],
+};
+function normKey(k){ return String(k).trim().replace(/\s+/g,'').toLowerCase(); }
+function pickCell(row, field){
+  const aliases = HEADER_ALIASES[field];
+  const key = Object.keys(row).find(k => aliases.includes(normKey(k)));
+  return key ? row[key] : '';
+}
+function parseGenderCell(v){
+  const s = String(v||'').trim();
+  if(/^(m|남|male)/i.test(s)) return 'M';
+  if(/^(f|여|female)/i.test(s)) return 'F';
+  return '';
+}
+function parseStageCell(v){
+  const s = String(v||'').trim();
+  if(s.includes('위기')) return 'crisis';
+  if(s.includes('집중')) return 'active';
+  if(s.includes('유지')) return 'maint';
+  return 'crisis'; // 단계가 비어 있거나 알 수 없으면 안전하게 위기(가장 잦은 점검)로 설정
+}
+function parseDateCell(v){
+  if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  if(typeof v === 'number' && window.XLSX && XLSX.SSF){
+    const d = XLSX.SSF.parse_date_code(v);
+    if(d) return `${d.y}-${String(d.m).padStart(2,'0')}-${String(d.d).padStart(2,'0')}`;
+  }
+  const s = String(v||'').trim();
+  const m = s.match(/^(\d{4})[.\-\/]\s*(\d{1,2})[.\-\/]\s*(\d{1,2})/) || s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m) return `${m[1]}-${String(+m[2]).padStart(2,'0')}-${String(+m[3]).padStart(2,'0')}`;
+  return '';
+}
+function rowToClient(row){
+  const name = String(pickCell(row,'name')||'').trim();
+  if(!name) return null;
+  return {
+    id: uid(),
+    name,
+    gender: parseGenderCell(pickCell(row,'gender')),
+    birth: parseDateCell(pickCell(row,'birth')),
+    address: String(pickCell(row,'address')||'').trim(),
+    phone: String(pickCell(row,'phone')||'').trim(),
+    diagnosis: String(pickCell(row,'diagnosis')||'').trim(),
+    hospital: String(pickCell(row,'hospital')||'').trim(),
+    suicideAttemptDate: parseDateCell(pickCell(row,'suicideAttemptDate')),
+    stage: parseStageCell(pickCell(row,'stage')),
+    lastDate: parseDateCell(pickCell(row,'lastDate')) || todayStr(),
+    registeredAt: todayStr(),
+  };
+}
+document.getElementById('importBtn').onclick = () => {
+  if(typeof XLSX === 'undefined'){ toast('엑셀 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인해주세요'); return; }
+  document.getElementById('importFile').click();
+};
+document.getElementById('importFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array', cellDates:true });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
+    const imported = rows.map(rowToClient).filter(Boolean);
+    if(!imported.length){ toast('가져올 데이터가 없습니다 (이름 열을 확인해주세요)'); return; }
+    const replace = confirm(`${imported.length}건을 읽었습니다.\n\n[확인] 기존 목록을 지우고 이 데이터로 교체\n[취소] 기존 목록 뒤에 추가`);
+    setAll(replace ? imported : [...getAll(), ...imported]);
+    render();
+    toast(`${imported.length}건 ${replace ? '교체' : '추가'} 완료`);
+  }catch(err){
+    toast('엑셀 파일을 읽는 중 문제가 발생했습니다');
+  }finally{
+    e.target.value = '';
+  }
+});
+
+function toast(m){ const t = document.getElementById('toast'); t.textContent = m; t.classList.add('on'); setTimeout(() => t.classList.remove('on'), 1600); }
+function copy(text, m){ navigator.clipboard.writeText(text).then(() => toast(m)); }
+
+document.getElementById('add').onclick = () => {
+  const list = getAll();
+  list.push({ id: uid(), name:'', gender:'', birth:'', address:'', phone:'', diagnosis:'', hospital:'', suicideAttemptDate:'', stage:'crisis', lastDate: todayStr(), registeredAt: todayStr() });
+  setAll(list);
+  render();
+};
+
+document.getElementById('stageTabs').addEventListener('click', e => {
+  const t = e.target.closest('.tab');
+  if(!t) return;
+  document.querySelectorAll('#stageTabs .tab').forEach(x => x.classList.remove('on'));
+  t.classList.add('on');
+  filterStage = t.dataset.stage;
+  render();
+});
+$search.addEventListener('input', render);
+
+const EXPORT_HEADER = ['이름','성별','나이','생년월일','주소','전화번호','진단명','이용병원','최근 자살시도','ISP 단계','최근 개입일','다음 개입 예정일','상태'];
+function buildExportRows(){
+  const list = getAll().slice().sort((a,b) => nextDueOf(a) < nextDueOf(b) ? -1 : 1);
+  return list.map(c => {
+    const due = nextDueOf(c);
+    const diff = dayDiff(due);
+    const status = diff < 0 ? `기한초과 ${Math.abs(diff)}일` : diff === 0 ? '오늘 개입' : `D-${diff}`;
+    const genderLabel = c.gender === 'M' ? '남' : c.gender === 'F' ? '여' : '';
+    return [c.name, genderLabel, calcAge(c.birth), c.birth, c.address, c.phone, c.diagnosis, c.hospital, c.suicideAttemptDate || '', STAGES[c.stage].label, c.lastDate || '', due, status];
+  });
+}
+
+document.getElementById('copyTable').onclick = () => {
+  const rows = [EXPORT_HEADER, ...buildExportRows()].map(r => r.join('\t'));
+  copy(rows.join('\n'), '표 형식으로 복사됨 — 한글에서 문자열을 표로');
+};
+
+document.getElementById('exportExcel').onclick = () => {
+  if(typeof XLSX === 'undefined'){ toast('엑셀 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인해주세요'); return; }
+  const ws = XLSX.utils.aoa_to_sheet([EXPORT_HEADER, ...buildExportRows()]);
+  ws['!cols'] = [{wch:10},{wch:6},{wch:6},{wch:12},{wch:26},{wch:15},{wch:14},{wch:16},{wch:14},{wch:8},{wch:12},{wch:14},{wch:14}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '사례관리현황');
+  XLSX.writeFile(wb, `case-management-${todayStr().replace(/-/g,'')}.xlsx`);
+  toast('엑셀 파일 다운로드');
+};
+
+// 초기 데이터: 저장된 값이 없으면 예시 3건으로 시작
+setAll(load() || [
+  { id: uid(), name:'홍길동', gender:'M', birth:'1975-03-14', address:'강원 원주시 단구로 123', phone:'010-1234-5678', diagnosis:'조현병', hospital:'원주정신건강의학과의원', suicideAttemptDate: addDays(todayStr(), -40), stage:'crisis', lastDate: addDays(todayStr(), -6), registeredAt: todayStr() },
+  { id: uid(), name:'김영희', gender:'F', birth:'1988-11-02', address:'강원 원주시 봉산로 45', phone:'010-2345-6789', diagnosis:'양극성정동장애', hospital:'원주기독병원', suicideAttemptDate:'', stage:'active', lastDate: addDays(todayStr(), -28), registeredAt: todayStr() },
+  { id: uid(), name:'이순신', gender:'M', birth:'1960-06-20', address:'강원 원주시 시청로 1', phone:'010-3456-7890', diagnosis:'알코올사용장애', hospital:'원주의료원', suicideAttemptDate:'', stage:'maint', lastDate: addDays(todayStr(), -80), registeredAt: todayStr() },
+]);
+render();
+</script>
+</body>
+</html>
