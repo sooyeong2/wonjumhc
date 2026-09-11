@@ -109,21 +109,23 @@
       <button id="copyTable">표로 복사</button>
       <button id="exportExcel">엑셀로 다운로드</button>
     </div>
-    <p class="tip">엑셀 첫 행에 <b>이름·성별·나이·생년월일·주소·전화번호·ISP단계·최근 개입일</b> 열 제목이 있으면 자동으로 인식합니다. (나이는 생년월일로 다시 계산되어 표시됩니다)</p>
+    <p class="tip">엑셀 첫 행에 <b>이름·성별·나이·생년월일·주소·전화번호·진단명·이용병원·ISP단계·최근 개입일</b> 열 제목이 있으면 자동으로 인식합니다. (나이는 생년월일로 다시 계산되어 표시됩니다)</p>
 
     <table>
       <thead>
         <tr>
-          <th style="width:9%">이름</th>
-          <th style="width:6%">성별</th>
-          <th style="width:5%">나이</th>
-          <th style="width:9%">생년월일</th>
-          <th style="width:14%">주소</th>
-          <th style="width:10%">전화번호</th>
-          <th style="width:8%">ISP 단계</th>
-          <th style="width:9%">최근 개입일</th>
-          <th style="width:12%">다음 개입 예정일</th>
-          <th style="width:12%"></th>
+          <th style="width:8%">이름</th>
+          <th style="width:5%">성별</th>
+          <th style="width:4%">나이</th>
+          <th style="width:8%">생년월일</th>
+          <th style="width:12%">주소</th>
+          <th style="width:9%">전화번호</th>
+          <th style="width:8%">진단명</th>
+          <th style="width:8%">이용병원</th>
+          <th style="width:7%">ISP 단계</th>
+          <th style="width:8%">최근 개입일</th>
+          <th style="width:10%">다음 개입 예정일</th>
+          <th style="width:10%"></th>
           <th style="width:3%"></th>
         </tr>
       </thead>
@@ -248,6 +250,8 @@ function buildRow(c, due){
     <td data-label="생년월일"><input class="f-birth" type="date" value="${c.birth||''}"></td>
     <td data-label="주소"><input class="f-addr" value="${esc(c.address)}" placeholder="주소"></td>
     <td data-label="전화번호"><input class="f-phone" value="${esc(c.phone)}" placeholder="010-0000-0000"></td>
+    <td data-label="진단명"><input class="f-diagnosis" value="${esc(c.diagnosis)}" placeholder="진단명"></td>
+    <td data-label="이용병원"><input class="f-hospital" value="${esc(c.hospital)}" placeholder="이용병원"></td>
     <td data-label="ISP 단계">
       <select class="f-stage">
         ${Object.entries(STAGES).map(([k,v]) => `<option value="${k}" ${c.stage===k?'selected':''}>${v.label} (${v.days === 7 ? '주1회' : v.days === 30 ? '월1회' : '3개월1회'})</option>`).join('')}
@@ -271,6 +275,8 @@ function buildRow(c, due){
   tr.querySelector('.f-birth').addEventListener('change', e => upd('birth', e.target.value));
   tr.querySelector('.f-addr').addEventListener('change', e => upd('address', e.target.value));
   tr.querySelector('.f-phone').addEventListener('change', e => upd('phone', e.target.value));
+  tr.querySelector('.f-diagnosis').addEventListener('change', e => upd('diagnosis', e.target.value));
+  tr.querySelector('.f-hospital').addEventListener('change', e => upd('hospital', e.target.value));
   tr.querySelector('.f-stage').addEventListener('change', e => upd('stage', e.target.value));
   tr.querySelector('.f-last').addEventListener('change', e => upd('lastDate', e.target.value));
   tr.querySelector('.done').addEventListener('click', () => { upd('lastDate', todayStr()); toast(`${c.name || '대상자'} 개입 기록 완료 · 다음 예정일 갱신`); });
@@ -291,6 +297,8 @@ const HEADER_ALIASES = {
   birth: ['생년월일','생일','birth','birthdate'],
   address: ['주소','address'],
   phone: ['전화번호','연락처','전화','phone'],
+  diagnosis: ['진단명','진단','diagnosis'],
+  hospital: ['이용병원','병원','이용병원명','hospital'],
   stage: ['isp단계','isp단계(위기/집중/유지)','isp','단계','stage'],
   lastDate: ['최근개입일','최근개입일자','개입일','최근개입','lastdate'],
 };
@@ -334,6 +342,8 @@ function rowToClient(row){
     birth: parseDateCell(pickCell(row,'birth')),
     address: String(pickCell(row,'address')||'').trim(),
     phone: String(pickCell(row,'phone')||'').trim(),
+    diagnosis: String(pickCell(row,'diagnosis')||'').trim(),
+    hospital: String(pickCell(row,'hospital')||'').trim(),
     stage: parseStageCell(pickCell(row,'stage')),
     lastDate: parseDateCell(pickCell(row,'lastDate')) || todayStr(),
     registeredAt: todayStr(),
@@ -369,7 +379,7 @@ function copy(text, m){ navigator.clipboard.writeText(text).then(() => toast(m))
 
 document.getElementById('add').onclick = () => {
   const list = getAll();
-  list.push({ id: uid(), name:'', gender:'', birth:'', address:'', phone:'', stage:'crisis', lastDate: todayStr(), registeredAt: todayStr() });
+  list.push({ id: uid(), name:'', gender:'', birth:'', address:'', phone:'', diagnosis:'', hospital:'', stage:'crisis', lastDate: todayStr(), registeredAt: todayStr() });
   setAll(list);
   render();
 };
@@ -384,7 +394,7 @@ document.getElementById('stageTabs').addEventListener('click', e => {
 });
 $search.addEventListener('input', render);
 
-const EXPORT_HEADER = ['이름','성별','나이','생년월일','주소','전화번호','ISP 단계','최근 개입일','다음 개입 예정일','상태'];
+const EXPORT_HEADER = ['이름','성별','나이','생년월일','주소','전화번호','진단명','이용병원','ISP 단계','최근 개입일','다음 개입 예정일','상태'];
 function buildExportRows(){
   const list = getAll().slice().sort((a,b) => nextDueOf(a) < nextDueOf(b) ? -1 : 1);
   return list.map(c => {
@@ -392,7 +402,7 @@ function buildExportRows(){
     const diff = dayDiff(due);
     const status = diff < 0 ? `기한초과 ${Math.abs(diff)}일` : diff === 0 ? '오늘 개입' : `D-${diff}`;
     const genderLabel = c.gender === 'M' ? '남' : c.gender === 'F' ? '여' : '';
-    return [c.name, genderLabel, calcAge(c.birth), c.birth, c.address, c.phone, STAGES[c.stage].label, c.lastDate || '', due, status];
+    return [c.name, genderLabel, calcAge(c.birth), c.birth, c.address, c.phone, c.diagnosis, c.hospital, STAGES[c.stage].label, c.lastDate || '', due, status];
   });
 }
 
@@ -404,7 +414,7 @@ document.getElementById('copyTable').onclick = () => {
 document.getElementById('exportExcel').onclick = () => {
   if(typeof XLSX === 'undefined'){ toast('엑셀 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인해주세요'); return; }
   const ws = XLSX.utils.aoa_to_sheet([EXPORT_HEADER, ...buildExportRows()]);
-  ws['!cols'] = [{wch:10},{wch:6},{wch:6},{wch:12},{wch:26},{wch:15},{wch:8},{wch:12},{wch:14},{wch:14}];
+  ws['!cols'] = [{wch:10},{wch:6},{wch:6},{wch:12},{wch:26},{wch:15},{wch:14},{wch:16},{wch:8},{wch:12},{wch:14},{wch:14}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '사례관리현황');
   XLSX.writeFile(wb, `case-management-${todayStr().replace(/-/g,'')}.xlsx`);
@@ -413,9 +423,9 @@ document.getElementById('exportExcel').onclick = () => {
 
 // 초기 데이터: 저장된 값이 없으면 예시 3건으로 시작
 setAll(load() || [
-  { id: uid(), name:'홍길동', gender:'M', birth:'1975-03-14', address:'강원 원주시 단구로 123', phone:'010-1234-5678', stage:'crisis', lastDate: addDays(todayStr(), -6), registeredAt: todayStr() },
-  { id: uid(), name:'김영희', gender:'F', birth:'1988-11-02', address:'강원 원주시 봉산로 45', phone:'010-2345-6789', stage:'active', lastDate: addDays(todayStr(), -28), registeredAt: todayStr() },
-  { id: uid(), name:'이순신', gender:'M', birth:'1960-06-20', address:'강원 원주시 시청로 1', phone:'010-3456-7890', stage:'maint', lastDate: addDays(todayStr(), -80), registeredAt: todayStr() },
+  { id: uid(), name:'홍길동', gender:'M', birth:'1975-03-14', address:'강원 원주시 단구로 123', phone:'010-1234-5678', diagnosis:'조현병', hospital:'원주정신건강의학과의원', stage:'crisis', lastDate: addDays(todayStr(), -6), registeredAt: todayStr() },
+  { id: uid(), name:'김영희', gender:'F', birth:'1988-11-02', address:'강원 원주시 봉산로 45', phone:'010-2345-6789', diagnosis:'양극성정동장애', hospital:'원주기독병원', stage:'active', lastDate: addDays(todayStr(), -28), registeredAt: todayStr() },
+  { id: uid(), name:'이순신', gender:'M', birth:'1960-06-20', address:'강원 원주시 시청로 1', phone:'010-3456-7890', diagnosis:'알코올사용장애', hospital:'원주의료원', stage:'maint', lastDate: addDays(todayStr(), -80), registeredAt: todayStr() },
 ]);
 render();
 </script>
