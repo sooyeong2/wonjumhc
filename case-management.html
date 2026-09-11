@@ -107,6 +107,7 @@
       <button id="importBtn">엑셀 업로드</button>
       <input type="file" id="importFile" accept=".xlsx,.xls,.csv" hidden>
       <button id="copyTable">표로 복사</button>
+      <button id="exportExcel">엑셀로 다운로드</button>
     </div>
     <p class="tip">엑셀 첫 행에 <b>이름·성별·나이·생년월일·주소·전화번호·ISP단계·최근 개입일</b> 열 제목이 있으면 자동으로 인식합니다. (나이는 생년월일로 다시 계산되어 표시됩니다)</p>
 
@@ -383,17 +384,31 @@ document.getElementById('stageTabs').addEventListener('click', e => {
 });
 $search.addEventListener('input', render);
 
-document.getElementById('copyTable').onclick = () => {
+const EXPORT_HEADER = ['이름','성별','나이','생년월일','주소','전화번호','ISP 단계','최근 개입일','다음 개입 예정일','상태'];
+function buildExportRows(){
   const list = getAll().slice().sort((a,b) => nextDueOf(a) < nextDueOf(b) ? -1 : 1);
-  const header = ['이름','성별','나이','생년월일','주소','전화번호','ISP 단계','최근 개입일','다음 개입 예정일','상태'].join('\t');
-  const body = list.map(c => {
+  return list.map(c => {
     const due = nextDueOf(c);
     const diff = dayDiff(due);
     const status = diff < 0 ? `기한초과 ${Math.abs(diff)}일` : diff === 0 ? '오늘 개입' : `D-${diff}`;
     const genderLabel = c.gender === 'M' ? '남' : c.gender === 'F' ? '여' : '';
-    return [c.name, genderLabel, calcAge(c.birth), c.birth, c.address, c.phone, STAGES[c.stage].label, c.lastDate || '', due, status].join('\t');
+    return [c.name, genderLabel, calcAge(c.birth), c.birth, c.address, c.phone, STAGES[c.stage].label, c.lastDate || '', due, status];
   });
-  copy([header, ...body].join('\n'), '표 형식으로 복사됨 — 한글에서 문자열을 표로');
+}
+
+document.getElementById('copyTable').onclick = () => {
+  const rows = [EXPORT_HEADER, ...buildExportRows()].map(r => r.join('\t'));
+  copy(rows.join('\n'), '표 형식으로 복사됨 — 한글에서 문자열을 표로');
+};
+
+document.getElementById('exportExcel').onclick = () => {
+  if(typeof XLSX === 'undefined'){ toast('엑셀 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인해주세요'); return; }
+  const ws = XLSX.utils.aoa_to_sheet([EXPORT_HEADER, ...buildExportRows()]);
+  ws['!cols'] = [{wch:10},{wch:6},{wch:6},{wch:12},{wch:26},{wch:15},{wch:8},{wch:12},{wch:14},{wch:14}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '사례관리현황');
+  XLSX.writeFile(wb, `case-management-${todayStr().replace(/-/g,'')}.xlsx`);
+  toast('엑셀 파일 다운로드');
 };
 
 // 초기 데이터: 저장된 값이 없으면 예시 3건으로 시작
