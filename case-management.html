@@ -108,9 +108,10 @@
       <thead>
         <tr>
           <th style="width:9%">이름</th>
+          <th style="width:6%">성별</th>
           <th style="width:5%">나이</th>
           <th style="width:9%">생년월일</th>
-          <th style="width:16%">주소</th>
+          <th style="width:14%">주소</th>
           <th style="width:10%">전화번호</th>
           <th style="width:8%">ISP 단계</th>
           <th style="width:9%">최근 개입일</th>
@@ -229,6 +230,13 @@ function buildRow(c, due){
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td data-label="이름"><input class="f-name" value="${esc(c.name)}" placeholder="이름"></td>
+    <td data-label="성별">
+      <select class="f-gender">
+        <option value="" ${!c.gender?'selected':''}>-</option>
+        <option value="M" ${c.gender==='M'?'selected':''}>남</option>
+        <option value="F" ${c.gender==='F'?'selected':''}>여</option>
+      </select>
+    </td>
     <td data-label="나이"><input class="age" value="${calcAge(c.birth)}" readonly></td>
     <td data-label="생년월일"><input class="f-birth" type="date" value="${c.birth||''}"></td>
     <td data-label="주소"><input class="f-addr" value="${esc(c.address)}" placeholder="주소"></td>
@@ -252,6 +260,7 @@ function buildRow(c, due){
 
   const upd = (field, val) => { c[field] = val; setAll(getAll()); render(); };
   tr.querySelector('.f-name').addEventListener('change', e => upd('name', e.target.value));
+  tr.querySelector('.f-gender').addEventListener('change', e => upd('gender', e.target.value));
   tr.querySelector('.f-birth').addEventListener('change', e => upd('birth', e.target.value));
   tr.querySelector('.f-addr').addEventListener('change', e => upd('address', e.target.value));
   tr.querySelector('.f-phone').addEventListener('change', e => upd('phone', e.target.value));
@@ -273,7 +282,7 @@ function copy(text, m){ navigator.clipboard.writeText(text).then(() => toast(m))
 
 document.getElementById('add').onclick = () => {
   const list = getAll();
-  list.push({ id: uid(), name:'', birth:'', address:'', phone:'', stage:'crisis', lastDate: todayStr(), registeredAt: todayStr() });
+  list.push({ id: uid(), name:'', gender:'', birth:'', address:'', phone:'', stage:'crisis', lastDate: todayStr(), registeredAt: todayStr() });
   setAll(list);
   render();
 };
@@ -290,21 +299,22 @@ $search.addEventListener('input', render);
 
 document.getElementById('copyTable').onclick = () => {
   const list = getAll().slice().sort((a,b) => nextDueOf(a) < nextDueOf(b) ? -1 : 1);
-  const header = ['이름','나이','생년월일','주소','전화번호','ISP 단계','최근 개입일','다음 개입 예정일','상태'].join('\t');
+  const header = ['이름','성별','나이','생년월일','주소','전화번호','ISP 단계','최근 개입일','다음 개입 예정일','상태'].join('\t');
   const body = list.map(c => {
     const due = nextDueOf(c);
     const diff = dayDiff(due);
     const status = diff < 0 ? `기한초과 ${Math.abs(diff)}일` : diff === 0 ? '오늘 개입' : `D-${diff}`;
-    return [c.name, calcAge(c.birth), c.birth, c.address, c.phone, STAGES[c.stage].label, c.lastDate || '', due, status].join('\t');
+    const genderLabel = c.gender === 'M' ? '남' : c.gender === 'F' ? '여' : '';
+    return [c.name, genderLabel, calcAge(c.birth), c.birth, c.address, c.phone, STAGES[c.stage].label, c.lastDate || '', due, status].join('\t');
   });
   copy([header, ...body].join('\n'), '표 형식으로 복사됨 — 한글에서 문자열을 표로');
 };
 
 // 초기 데이터: 저장된 값이 없으면 예시 3건으로 시작
 setAll(load() || [
-  { id: uid(), name:'홍길동', birth:'1975-03-14', address:'강원 원주시 단구로 123', phone:'010-1234-5678', stage:'crisis', lastDate: addDays(todayStr(), -6), registeredAt: todayStr() },
-  { id: uid(), name:'김영희', birth:'1988-11-02', address:'강원 원주시 봉산로 45', phone:'010-2345-6789', stage:'active', lastDate: addDays(todayStr(), -28), registeredAt: todayStr() },
-  { id: uid(), name:'이순신', birth:'1960-06-20', address:'강원 원주시 시청로 1', phone:'010-3456-7890', stage:'maint', lastDate: addDays(todayStr(), -80), registeredAt: todayStr() },
+  { id: uid(), name:'홍길동', gender:'M', birth:'1975-03-14', address:'강원 원주시 단구로 123', phone:'010-1234-5678', stage:'crisis', lastDate: addDays(todayStr(), -6), registeredAt: todayStr() },
+  { id: uid(), name:'김영희', gender:'F', birth:'1988-11-02', address:'강원 원주시 봉산로 45', phone:'010-2345-6789', stage:'active', lastDate: addDays(todayStr(), -28), registeredAt: todayStr() },
+  { id: uid(), name:'이순신', gender:'M', birth:'1960-06-20', address:'강원 원주시 시청로 1', phone:'010-3456-7890', stage:'maint', lastDate: addDays(todayStr(), -80), registeredAt: todayStr() },
 ]);
 render();
 </script>
